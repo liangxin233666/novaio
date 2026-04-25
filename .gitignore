@@ -1,0 +1,15 @@
+build/
+bin/
+out/
+
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+Makefile
+
+
+CMakeLists.txt.user
+CMakeUserPresets.json
+.cmake/
