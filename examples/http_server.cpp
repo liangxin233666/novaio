@@ -11,11 +11,14 @@
 #include <string_view>
 #include <thread>
 #include <chrono>
+#include <algorithm>
+#include <cstdlib>
+#include <cerrno>
 
 using namespace novaio;
 
 
-constexpr std::string_view HTTP_RESPONSE = 
+constexpr std::string_view HTTP_RESPONSE =
     "HTTP/1.1 200 OK\r\n"
     "Content-Type: text/plain\r\n"
     "Content-Length: 13\r\n"
@@ -23,7 +26,18 @@ constexpr std::string_view HTTP_RESPONSE =
     "\r\n"
     "Hello NovaIO!";
 
-constexpr uint32_t CQE_F_BUFFER = 1U << 0; 
+constexpr uint32_t CQE_F_BUFFER = 1U << 0;
+
+size_t env_size_or(const char* name, size_t fallback) {
+    if (const char* value = std::getenv(name)) {
+        char* end = nullptr;
+        unsigned long parsed = std::strtoul(value, &end, 10);
+        if (end != value && parsed > 0) {
+            return static_cast<size_t>(parsed);
+        }
+    }
+    return fallback;
+}
 
 
 DetachedTask handle_client(int direct_fd) {
@@ -31,33 +45,35 @@ DetachedTask handle_client(int direct_fd) {
     if (!scheduler) co_return;
 
     while (true) {
-        
+
         auto result = co_await scheduler->io_engine().recv_direct(direct_fd);
-        
+
         if (result.flags & CQE_F_BUFFER) {
             uint16_t buf_id = result.flags >> 16;
-            
+
             scheduler->io_engine().return_buffer(buf_id);
         }
-        
-        
-        if (result.res <= 0) break; 
 
-        // 2026 标准：send_direct 使用 Fixed File 和 Direct Descriptor
+
+        if (result.res <= 0) break;
+
+
         auto send_result = co_await scheduler->io_engine().send_direct(
             direct_fd, HTTP_RESPONSE.data(), HTTP_RESPONSE.size());
 
         if (send_result.res < 0) break;
     }
-    
-    
+
+
     co_await scheduler->io_engine().close_direct(direct_fd);
 }
 
 
-[[gnu::aligned(8)]] static void on_accept_callback(int res, uint32_t flags) {
+struct Acceptor : public MultishotOp {};
+
+static void on_accept_callback(MultishotOp*, int res, uint32_t flags) {
     if (res >= 0) {
-        
+
         Scheduler::current()->schedule(handle_client(res).coro_);
     } else {
         if (res != -EAGAIN && res != -EINTR) {
@@ -83,24 +99,29 @@ void start_multishot_server(int port) {
         perror("bind");
         return;
     }
-    
-    listen(server_fd, 32768); 
 
-    std::println("NovaIO [Linux 7.0 Ultra Edition] listening on {}...", port);
+    listen(server_fd, 32768);
+
+    std::println("NovaIO listening on {}...", port);
     std::println("Status: Multishot Accept enabled, UserData Pointer Tagging active.");
 
     auto* scheduler = Scheduler::current();
-    
-    scheduler->io_engine().accept_multishot(server_fd, on_accept_callback);
+    auto* acceptor = new Acceptor{};
+    acceptor->invoke = on_accept_callback;
+    scheduler->io_engine().accept_multishot(server_fd, acceptor);
 }
 
 int main() {
-  
-    size_t cores = std::thread::hardware_concurrency(); 
+    size_t hardware = std::max<size_t>(1, std::thread::hardware_concurrency());
+    size_t cores = env_size_or("NOVAIO_CORES", hardware);
+    size_t listeners = env_size_or("NOVAIO_LISTENERS", cores);
+    listeners = std::min(listeners, cores);
+
+    std::println("NovaIO runtime cores: {}, listener schedulers: {}", cores, listeners);
     Runtime::get().start(cores);
-    
-  
-    for (size_t i = 0; i < 8; ++i) {
+
+
+    for (size_t i = 0; i < listeners; ++i) {
         Runtime::get().dispatch_on(i, UniqueTask([i]() {
             start_multishot_server(8080);
         }));
@@ -110,6 +131,6 @@ int main() {
     while(true) {
         std::this_thread::sleep_for(std::chrono::hours(24));
     }
-    
+
     return 0;
 }

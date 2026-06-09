@@ -1,0 +1,81 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "Developer Debug",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/dev",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "NOVAIO_BUILD_EXAMPLES": "ON",
+        "NOVAIO_ENABLE_METRICS": "ON",
+        "NOVAIO_ENABLE_LIBCXX": "ON",
+        "NOVAIO_ENABLE_X86_64_V3": "OFF"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release Benchmark",
+      "inherits": "dev",
+      "binaryDir": "${sourceDir}/out/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "NOVAIO_ENABLE_X86_64_V3": "ON"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "Sanitizer Debug",
+      "inherits": "dev",
+      "binaryDir": "${sourceDir}/out/asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "NOVAIO_ENABLE_SANITIZERS": "ON",
+        "NOVAIO_ENABLE_X86_64_V3": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "stopOnFailure": true
+      }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "stopOnFailure": true
+      }
+    }
+  ]
+}

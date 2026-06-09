@@ -7,11 +7,13 @@
 #include <mutex>
 #include "novaio/concurrent_queues.hpp"
 
-//#define NOVAIO_ENABLE_METRICS 1
+#ifndef NOVAIO_ENABLE_METRICS
+#define NOVAIO_ENABLE_METRICS 1
+#endif
 
 namespace novaio {
 
-#ifdef NOVAIO_ENABLE_METRICS
+#if NOVAIO_ENABLE_METRICS
 struct alignas(CACHE_LINE) TcmMetrics {
     uint64_t tasks_executed{0};
     uint64_t io_events_reaped{0};
@@ -24,19 +26,19 @@ struct TcmMetrics {};
 extern thread_local TcmMetrics current_thread_metrics;
 
 inline void metrics_record_task_executed() noexcept {
-#ifdef NOVAIO_ENABLE_METRICS
+#if NOVAIO_ENABLE_METRICS
     current_thread_metrics.tasks_executed++;
 #endif
 }
 
 inline void metrics_record_io_event() noexcept {
-#ifdef NOVAIO_ENABLE_METRICS
+#if NOVAIO_ENABLE_METRICS
     current_thread_metrics.io_events_reaped++;
 #endif
 }
 
 inline void metrics_record_inbox_processed() noexcept {
-#ifdef NOVAIO_ENABLE_METRICS
+#if NOVAIO_ENABLE_METRICS
     current_thread_metrics.inbox_messages_processed++;
 #endif
 }
@@ -49,14 +51,14 @@ public:
     }
 
     inline void register_thread(TcmMetrics* metrics) {
-#ifdef NOVAIO_ENABLE_METRICS
+#if NOVAIO_ENABLE_METRICS
         std::unique_lock lock(rw_mutex_);
         thread_metrics_.push_back(metrics);
 #endif
     }
 
     inline void unregister_thread(TcmMetrics* metrics) {
-#ifdef NOVAIO_ENABLE_METRICS
+#if NOVAIO_ENABLE_METRICS
         std::unique_lock lock(rw_mutex_);
         for (auto it = thread_metrics_.begin(); it != thread_metrics_.end(); ++it) {
             if (*it == metrics) {
@@ -69,7 +71,7 @@ public:
 
     inline TcmMetrics aggregate() const {
         TcmMetrics total{};
-#ifdef NOVAIO_ENABLE_METRICS
+#if NOVAIO_ENABLE_METRICS
         std::shared_lock lock(rw_mutex_);
         for (const auto* m : thread_metrics_) {
             total.tasks_executed += m->tasks_executed;
@@ -84,7 +86,7 @@ private:
     MetricsRegistry() = default;
     ~MetricsRegistry() = default;
 
-#ifdef NOVAIO_ENABLE_METRICS
+#if NOVAIO_ENABLE_METRICS
     mutable std::shared_mutex rw_mutex_;
     std::vector<TcmMetrics*> thread_metrics_;
 #endif

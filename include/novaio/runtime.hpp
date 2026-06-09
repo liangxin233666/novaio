@@ -19,7 +19,7 @@ public:
 
     
     void dispatch_on(size_t core_id, UniqueTask task);
-
+    void notify_target_ring(int target_fd, uint64_t msg_data);
     Scheduler* get_scheduler(size_t id) { return schedulers_[id].get(); }
     size_t get_core_count() const { return schedulers_.size(); }
 

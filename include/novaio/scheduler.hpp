@@ -10,8 +10,6 @@
 
 namespace novaio {
 
-
-// UniqueTask专门投递任务
 class UniqueTask {
     struct Storage {
         void* ptr;
@@ -20,7 +18,7 @@ class UniqueTask {
     };
 public:
     UniqueTask() : storage_{nullptr, nullptr, nullptr} {}
-    
+
     template<typename F>
     UniqueTask(F&& f) {
         using FuncType = std::decay_t<F>;
@@ -28,9 +26,9 @@ public:
         new (buf) FuncType(std::forward<F>(f));
         storage_.ptr = buf;
         storage_.invoker = [](void* p) { (*static_cast<FuncType*>(p))(); };
-        storage_.deleter = [](void* p) { 
-            static_cast<FuncType*>(p)->~FuncType(); 
-            mi_free(p); 
+        storage_.deleter = [](void* p) {
+            static_cast<FuncType*>(p)->~FuncType();
+            mi_free(p);
         };
     }
 
@@ -58,27 +56,31 @@ private:
 };
 
 extern thread_local mi_heap_t* current_thread_heap;
-constexpr size_t BATCH_PIPELINE_DEPTH = 16; 
+constexpr size_t BATCH_PIPELINE_DEPTH = 16;
 constexpr uint64_t WAKEUP_USER_DATA = 0;
 
 class Scheduler {
 public:
+    friend class IoEngine;
+
     explicit Scheduler(size_t id);
     ~Scheduler();
 
     void run();
     void schedule(std::coroutine_handle<> handle);
-    
-    void push_inbox(UniqueTask task);
+
+    bool push_inbox(UniqueTask task);
 
     size_t id() const { return id_; }
     static Scheduler* current() noexcept;
-    
+
     TimeWheel& time_wheel() { return time_wheel_; }
     uint64_t current_time_ms() const;
     IoEngine& io_engine() noexcept { return io_engine_; }
-    int ring_fd() const { return io_engine_.ring_fd(); }
-    
+
+    int ring_fd() const noexcept { return io_engine_.ring_fd(); }
+
+
 private:
     size_t try_dequeue_batch(std::coroutine_handle<>* batch_out, size_t max_count);
     void process_io_events();
@@ -86,11 +88,11 @@ private:
     void setup_numa_and_affinity();
 
     size_t id_;
-    int wakeup_fd_{-1}; 
-    LocalQueue local_queue_;             
-    SpscQueue<UniqueTask> inbox_;       
+
+    LocalQueue local_queue_;
+    SpscQueue<UniqueTask> inbox_;
     IoEngine io_engine_;
-    
+
     std::coroutine_handle<> runnext_{nullptr};
     mi_heap_t* thread_heap_{nullptr};
     TimeWheel time_wheel_;

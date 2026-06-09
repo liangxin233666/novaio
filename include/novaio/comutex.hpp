@@ -1,12 +1,13 @@
+// --- START OF FILE comutex.hpp ---
 #pragma once
 
 #include <atomic>
 #include <coroutine>
 #include <cstdint>
+#include "novaio/scheduler.hpp"
+#include "novaio/runtime.hpp"
 
 namespace novaio {
-
-class Scheduler;
 
 class CoMutex {
 public:
@@ -24,14 +25,7 @@ public:
 
         explicit Awaiter(CoMutex& m) noexcept : mutex_(m) {}
 
-        bool await_ready() const noexcept {
-            uintptr_t expected = UNLOCKED;
-            return mutex_.state_.compare_exchange_strong(
-                expected, LOCKED_NO_WAITERS,
-                std::memory_order_acquire,
-                std::memory_order_relaxed);
-        }
-
+        bool await_ready() const noexcept { return false; }
         bool await_suspend(std::coroutine_handle<> h) noexcept;
         void await_resume() const noexcept {}
     };
@@ -42,8 +36,10 @@ public:
 private:
     static constexpr uintptr_t UNLOCKED = 0;
     static constexpr uintptr_t LOCKED_NO_WAITERS = 1;
-    
+
     alignas(64) std::atomic<uintptr_t> state_{UNLOCKED}; 
+
+    Awaiter* waiters_head_{nullptr};
 };
 
 } 

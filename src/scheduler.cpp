@@ -4,10 +4,41 @@
 #include <pthread.h>
 #include <numa.h>
 #include <chrono>
-#include <sys/eventfd.h>
+#include <charconv>
+#include <filesystem>
+#include <string>
+#include <string_view>
 #include <unistd.h>
 #include <poll.h>
 #include "novaio/metrics.hpp"
+
+namespace {
+
+int detect_numa_node_for_cpu(size_t cpu) noexcept {
+    namespace fs = std::filesystem;
+
+    std::error_code ec;
+    fs::path cpu_dir = fs::path{"/sys/devices/system/cpu"} / ("cpu" + std::to_string(cpu));
+
+    for (const auto& entry : fs::directory_iterator(cpu_dir, ec)) {
+        std::string name = entry.path().filename().string();
+        constexpr std::string_view prefix = "node";
+        if (!name.starts_with(prefix)) {
+            continue;
+        }
+
+        int node = -1;
+        std::string_view suffix{name.data() + prefix.size(), name.size() - prefix.size()};
+        auto [ptr, parse_ec] = std::from_chars(suffix.data(), suffix.data() + suffix.size(), node);
+        if (parse_ec == std::errc{} && ptr == suffix.data() + suffix.size()) {
+            return node;
+        }
+    }
+
+    return -1;
+}
+
+} // namespace
 
 namespace novaio {
 
@@ -23,11 +54,11 @@ uint64_t Scheduler::current_time_ms() const {
 }
 
 Scheduler::Scheduler(size_t id) : id_(id) {
-    wakeup_fd_ = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+
 }
 
 Scheduler::~Scheduler() {
-    if (wakeup_fd_ >= 0) close(wakeup_fd_);
+
     if (thread_heap_) mi_heap_delete(thread_heap_);
     MetricsRegistry::get().unregister_thread(&current_thread_metrics);
 }
@@ -39,17 +70,14 @@ void Scheduler::setup_numa_and_affinity() {
     pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
 
     thread_heap_ = mi_heap_new();
-    int numa_node = numa_node_of_cpu(id_);
+    int numa_node = detect_numa_node_for_cpu(id_);
     if (numa_node >= 0) mi_heap_set_numa_affinity(thread_heap_, numa_node);
     current_thread_heap = thread_heap_;
 }
 
 
-void Scheduler::push_inbox(UniqueTask task) {
-    if (inbox_.push(std::move(task))) {
-        uint64_t val = 1;
-        ::write(wakeup_fd_, &val, sizeof(val)); 
-    }
+bool Scheduler::push_inbox(UniqueTask task) {
+    return inbox_.push(std::move(task));
 }
 
 
@@ -57,20 +85,16 @@ void Scheduler::process_inbox() {
     UniqueTask task;
     while (inbox_.pop(task)) {
         metrics_record_inbox_processed();
-        if (task) task(); 
+        if (task) task();
     }
 }
 
 void Scheduler::run() {
     setup_numa_and_affinity();
-    io_engine_.init(); 
+    io_engine_.init();
 
     current_scheduler_ptr = this;
     MetricsRegistry::get().register_thread(&current_thread_metrics);
-
-    struct io_uring_sqe* sqe = io_uring_get_sqe(io_engine_.raw_ring());
-    io_uring_prep_poll_multishot(sqe, wakeup_fd_, POLLIN);
-    io_uring_sqe_set_data(sqe, reinterpret_cast<void*>(WAKEUP_USER_DATA));
 
     std::array<std::coroutine_handle<>, BATCH_PIPELINE_DEPTH> batch;
     uint64_t last_tick_time = current_time_ms();
@@ -88,15 +112,15 @@ void Scheduler::run() {
 
         if (count == 0) {
             io_uring_submit(io_engine_.raw_ring());
-            process_io_events(); 
-            continue; 
+            process_io_events();
+            continue;
         }
 
         for (size_t i = 0; i < count; ++i) {
             if (i + 1 < count && batch[i + 1]) __builtin_prefetch(batch[i + 1].address(), 1, 3);
             auto handle = batch[i];
             if (handle && !handle.done()) {
-                handle.resume(); 
+                handle.resume();
                 metrics_record_task_executed();
             }
         }
@@ -106,9 +130,9 @@ void Scheduler::run() {
 
 void Scheduler::schedule(std::coroutine_handle<> handle) {
     if (!runnext_) {
-        runnext_ = handle; 
+        runnext_ = handle;
     } else {
-        local_queue_.push(handle); 
+        local_queue_.push(handle);
     }
 }
 
@@ -138,9 +162,8 @@ void Scheduler::process_io_events() {
         ret = io_uring_wait_cqe_timeout(io_engine_.raw_ring(), &cqe, &ts);
     }
     if (ret == 0 || ret == -ETIME) {
-        io_engine_.poll(); 
-        uint64_t val;
-        while (::read(wakeup_fd_, &val, sizeof(val)) > 0) {} 
+        io_engine_.poll();
+
     }
 }
 

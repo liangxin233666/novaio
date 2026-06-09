@@ -62,7 +62,6 @@ public:
         ::operator delete[](buffer_);
     }
 
-    // 供主调度器调用
     bool push(T item) {
         std::size_t tail = tail_.load(std::memory_order_relaxed);
         std::size_t next_tail = tail + 1;
@@ -74,7 +73,6 @@ public:
         return true;
     }
 
-    // 供 Worker 线程调用
     bool pop(T& item_out) {
         std::size_t head = head_.load(std::memory_order_relaxed);
         if (head == tail_.load(std::memory_order_acquire)) {
